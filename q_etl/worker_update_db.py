@@ -1,14 +1,15 @@
 import asyncio
 import datetime
-from .etl import Pipeline
-from .config import DB_TOPIC
+from q_etl.etl import Pipeline
+from q_etl.config import DB_TOPIC
 
 
 async def main():
 	print('Starting worker...')
-	worker_id = Pipeline.register_worker('worker_pull_data', 'localhost', datetime.datetime.now())
+	pipeline = Pipeline()
+	worker_id = pipeline.register_worker('worker_pull_data', 'localhost', datetime.datetime.now())
 	print(f'Worker registered with id {worker_id}')
-	Pipeline.poll(worker_id, DB_TOPIC)
+	await pipeline.poll(worker_id, DB_TOPIC)
 
 
 if __name__ == '__main__':

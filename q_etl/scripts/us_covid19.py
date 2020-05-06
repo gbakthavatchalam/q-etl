@@ -2,6 +2,10 @@ import asyncio
 import aiohttp
 import datetime
 import json
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 
 def parse_row(row):
@@ -9,7 +13,7 @@ def parse_row(row):
 		'state_code': row['state'],
 		'state_name': row['state'],
 		'total_affected': row['positive'],
-		'hospitalized_currently': row['hospitalizedCurrently'],
+		'hospitalized_currently': row.get('hospitalizedCurrently', 0),
 		'in_icu_currently': row['inIcuCurrently'],
 		'on_ventilator_currently': row['onVentilatorCurrently'],
 		'total_recovered': row['recovered'],
@@ -17,14 +21,14 @@ def parse_row(row):
 		'total_tests': row['totalTestResults']
 	}
 	if 'date' in row:
-		item['date'] = str(datetime.datetime.strptime(row['date'], '%Y%m%d'))
+		item['date'] = str(datetime.datetime.strptime(str(row['date']), '%Y%m%d'))
 	return item
 
 
 def filter_rows(rows, lag):
 	result = []
 	for row in rows:
-		dt = datetime.datetime.strptime(row['date'], '%Y%m%d')
+		dt = datetime.datetime.strptime(str(row['date']), '%Y%m%d')
 		if dt.date() >= datetime.date.today() - datetime.timedelta(days=lag):
 			result.append(row)
 	return result
@@ -52,7 +56,12 @@ async def get_state_day_wise(lag):
 				result = json.loads(await response.text())
 				if lag > 0:
 					result = filter_rows(result, lag)
-				parsed = [parse_row(row) for row in result]
+				parsed = []
+				for row in result:
+					try:
+						parsed.append(parse_row(row))
+					except KeyError:
+						logger.error(f"Data error {row}")
 				return {'table': table, 'refresh': False, 'data': parsed}, None
 			except Exception as e:
 				return {}, str(e)

@@ -4,7 +4,7 @@ import json
 from confluent_kafka import Producer
 
 p = Producer({'bootstrap.servers': 'localhost:9092', 'group.id': 'mygroup'})
-TOPIC = "batch"
+TOPIC = "job"
 
 
 class ProducerError(Exception):
@@ -17,22 +17,10 @@ def produce(topic, key, value):
 
 
 def main():
-	messages = [
-		{
-			"connector": "api_holiday",
-			"resources": [
-				{
-					"name": "HolidayAPI",
-					"method": "get",
-					"params": {
-						"country": "all",
-						"year": 2019
-					}
-				}
-			]
-		}
-	]
-	for message in messages:
-		produce(TOPIC, key=str(uuid.uuid4()).encode(), value=message)
+	message = {
+		"method": "ingest_covid_data",
+		"params": {}
+	}
+	produce(TOPIC, key=str(uuid.uuid4()).encode(), value=message)
 
 main()

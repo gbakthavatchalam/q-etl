@@ -29,12 +29,19 @@ class PipelineError(Exception):
 
 
 class Pipeline:
+	__db_handle = None
+
 	@property
 	def tranid(self):
 		return uuid.uuid4()
 
-	@staticmethod
-	async def call_job(tranid, message):
+	@property
+	def db(self):
+		if not self.__db_handle:
+			self.__db_handle = S3Backend('access key', 'secret key')
+		return self.__db_handle
+
+	async def call_job(self, tranid, message):
 		logger.info(f'Processing transaction {tranid}')
 		try:
 			method = registry[message['method']]
@@ -42,56 +49,53 @@ class Pipeline:
 			logger.info(f'Calling method {method} with params {params}')
 			result, error = await method(**params)
 			if error:
-				Pipeline.write_to_error_queue(tranid, error)
+				self.write_to_error_queue(tranid, error)
 				raise PipelineError(f'Error response from method {method}')
 			else:
-				Pipeline.write_to_db_queue(tranid, result)
+				self.write_to_db_queue(tranid, result)
+			logger.info(f'Processing complete')
+			return
 		except KeyError:
-			logging.error('Invalid method name')
+			logger.error('Invalid method name')
 			raise PipelineError('Invalid method name')
-		except:
-			logging.error(f'Unknown exception while processing tranid {tranid}')
-			raise PipelineError(f'Unknown exception while processing tranid {tranid}')
+		except Exception as e:
+			logger.error(f'Unknown exception while processing tranid {tranid} : {e}')
+			raise PipelineError(f'Unknown exception while processing tranid {tranid} : {e}')
 
-	@staticmethod
-	async def update_db(tranid, message):
-		logging.info(f'Processing transaction {tranid}')
+	async def update_db(self, tranid, message):
+		logger.info(f'Processing transaction {tranid}')
 		try:
 			for item in message:
 				table = item['table']
 				refresh = item['refresh']
 				data = item['data']
-				S3Backend.update(table, refresh, data)
+				self.db.update(table, refresh, data)
+			logger.info('DB update complete')
 		except Exception as e:
-			logging.error(e)
-			Pipeline.write_to_error_queue(tranid, item)
+			logger.error(e)
+			self.write_to_error_queue(tranid, item)
 
-
-	@staticmethod
-	async def log_error(tranid, message):
-		logging.info(f'Processing transaction {tranid}')
-		logging.error(message)
+	async def log_error(self, tranid, message):
+		logger.info(f'Processing transaction {tranid}')
+		logger.error(message)
 		#S3Backend.log_Error("transaction_error", False, message)
 
-	@staticmethod
-	def write_to_error_queue(tranid, error):
-		p.produce(ERROR_TOPIC, key=tranid.encode(), value=json.dumps(error).encode())
+	def write_to_error_queue(self, tranid, error):
+		p.produce(ERROR_TOPIC, key=tranid, value=json.dumps(error).encode())
 		p.poll(0.5)
 
-	@staticmethod
-	def write_to_db_queue(tranid, result):
-		p.produce(DB_TOPIC, key=tranid.encode(), value=json.dumps(result).encode())
+	def write_to_db_queue(self, tranid, result):
+		p.produce(DB_TOPIC, key=tranid, value=json.dumps(result).encode())
 		p.poll(0.5)
 
-	@staticmethod
-	async def poll(worker_id, topic):
+	async def poll(self, worker_id, topic):
 		logger.info(f'Worker {worker_id} starts polling kakfa on topic {topic}')
-		total_counter  = 0
+		total_counter = 0
 		success_counter = 0
 		_map = {
-			UPSTREAM_TOPIC: Pipeline.call_job,
-			DB_TOPIC: Pipeline.update_db,
-			ERROR_TOPIC: Pipeline.log_error
+			UPSTREAM_TOPIC: self.call_job,
+			DB_TOPIC: self.update_db,
+			ERROR_TOPIC: self.log_error
 		}
 		c = Consumer(settings)
 		c.subscribe([topic])
@@ -109,7 +113,7 @@ class Pipeline:
 					success_counter += 1
 				except PipelineError:
 					pass
-				Pipeline.update_worker(worker_id, datetime.datetime.now(), total_counter, success_counter)
+				self.update_worker(worker_id, str(datetime.datetime.now()), total_counter, success_counter)
 
 	@staticmethod
 	def register_worker(name, ip, inittime):
@@ -127,4 +131,4 @@ class Pipeline:
 		data = {"last_processed": last_message_processed, "total_processed": total_processed, "total_success": total_success}
 		response = requests.put(url, json=data)
 		if response.status_code == 200:
-			logger.info(f'Worker registered with id {response.json()["id"]}')
+			logger.info(f'Worker {worker_id} health updated')
