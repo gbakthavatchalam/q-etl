@@ -1,6 +1,6 @@
 requests==2.23.0
 confluent_kafka==1.4.1
 boto3==1.11.17
-fastapi==0.54.1
+fastapi==0.65.2
 aiohttp==3.6.2
 pandas==1.0.3
